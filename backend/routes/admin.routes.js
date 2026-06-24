@@ -11,5 +11,6 @@ router.post("/data-sources", controller.createDataSource);
 router.patch("/data-sources/:id", controller.updateDataSource);
 router.post("/sync/run", controller.runSync);
 router.get("/sync/logs", controller.syncLogs);
+router.get("/jobs", controller.jobs);
 
 module.exports = router;

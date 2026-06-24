@@ -4,7 +4,12 @@ const controller = require("../controllers/resource.controller");
 const validate = require("../middlewares/validate.middleware");
 const { protect } = require("../middlewares/auth.middleware");
 
-const schema = Joi.object({ paperId: Joi.string(), note: Joi.string().allow(""), tags: Joi.array().items(Joi.string()).default([]) });
+const schema = Joi.object({
+  paperId: Joi.string(),
+  collection: Joi.string().trim().allow("").default("General"),
+  note: Joi.string().allow(""),
+  tags: Joi.array().items(Joi.string().trim().allow("")).default([])
+});
 
 router.get("/", protect, controller.listBookmarks);
 router.post("/", protect, validate(schema.fork(["paperId"], (item) => item.required())), controller.createBookmark);

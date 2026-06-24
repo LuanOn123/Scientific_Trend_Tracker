@@ -1,5 +1,5 @@
 const cron = require("node-cron");
-const syncService = require("../services/sync.service");
+const jobQueue = require("../services/jobQueue.service");
 
 exports.startSyncJob = () => {
   const expression = process.env.SYNC_CRON || "0 2 * * *";
@@ -11,9 +11,9 @@ exports.startSyncJob = () => {
     const keywords = (process.env.DEFAULT_SYNC_KEYWORDS || "").split(",").map((item) => item.trim()).filter(Boolean);
     if (!keywords.length) return;
     try {
-      await syncService.runSync(keywords);
+      await Promise.all(keywords.map((keyword) => jobQueue.enqueue("metadata_ingestion", { query: keyword, source: "all", limit: 10 })));
     } catch (error) {
-      console.error("Scheduled sync failed:", error.message);
+      console.error("Scheduled sync queueing failed:", error.message);
     }
   });
 };

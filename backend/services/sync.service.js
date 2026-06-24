@@ -4,7 +4,7 @@ const Author = require("../models/Author");
 const Notification = require("../models/Notification");
 const SyncLog = require("../models/SyncLog");
 const User = require("../models/User");
-const semanticScholar = require("./semanticScholar.service");
+const ingestionPipeline = require("./pipeline/ingestionPipeline.service");
 const trendAnalyzer = require("./trendAnalyzer.service");
 
 const upsertPaper = async (paper) => {
@@ -33,26 +33,22 @@ const upsertPaper = async (paper) => {
   return { paper: created, created: true };
 };
 
-exports.searchAndCache = async ({ query, yearFrom, yearTo, limit = 20 }) => {
-  const results = await semanticScholar.searchWorks({ query, yearFrom, yearTo, limit: Math.min(limit, 10) });
-  const saved = [];
-  for (const paper of results) {
-    const { paper: savedPaper } = await upsertPaper(paper);
-    saved.push(savedPaper);
-  }
-  if (saved.length) await trendAnalyzer.rebuildTrends();
-  return saved;
+exports.searchAndCache = async ({ query, yearFrom, yearTo, limit = 20, source = "semantic_scholar" }) => {
+  const result = await ingestionPipeline.ingestMetadata({ query, yearFrom, yearTo, limit: Math.min(limit, 10), source });
+  if (result.papers.length) await trendAnalyzer.rebuildTrends();
+  if (!result.papers.length && result.failures.length) throw new Error(result.failures.map((item) => `${item.providerName}: ${item.message}`).join(" | "));
+  return result.papers;
 };
 
 exports.runSync = async (keywords) => {
   const startedAt = new Date();
-  const log = await SyncLog.create({ sourceName: "semantic_scholar", status: "running", message: "Semantic Scholar sync started", startedAt });
+  const log = await SyncLog.create({ sourceName: "multi_source", status: "running", message: "Metadata sync started", startedAt });
   try {
     const unique = new Map();
     const failures = [];
     for (const keyword of keywords) {
       try {
-        const papers = await exports.searchAndCache({ query: keyword, limit: 10 });
+        const papers = await exports.searchAndCache({ query: keyword, limit: 10, source: "all" });
         papers.forEach((paper) => unique.set(String(paper._id), { paper, keyword }));
       } catch (error) {
         failures.push(`${keyword}: ${error.response?.status || ""} ${error.response?.data?.message || error.message}`.trim());

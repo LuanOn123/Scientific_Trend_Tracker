@@ -1,14 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
 import { BarChart3, BookOpen, Library, Tags } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "../api/client";
 import { ChartCard, EmptyState, LoadingSpinner, StatCard } from "../components/ui";
-import type { ApiResponse, DashboardData } from "../types";
+import type { ApiResponse, DashboardData, Recommendation } from "../types";
 
 export function DashboardPage() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["dashboard"],
     queryFn: async () => (await api.get<ApiResponse<DashboardData>>("/dashboard/summary")).data.data
+  });
+  const recommendations = useQuery({
+    queryKey: ["recommendations"],
+    queryFn: async () => (await api.get<ApiResponse<{ items: Recommendation[] }>>("/recommendations", { params: { limit: 5 } })).data.data.items
   });
   if (isLoading) return <LoadingSpinner />;
   if (isError || !data) return <EmptyState title="Dashboard unavailable" description="Check backend connection and Semantic Scholar data." />;
@@ -38,6 +43,20 @@ export function DashboardPage() {
           <div className="grid gap-3 sm:grid-cols-2">{data.emerging.topics.slice(0, 6).map((topic) => <div className="rounded-lg border border-slate-200 bg-white p-4" key={topic._id}><p className="font-semibold text-navy">{topic.name}</p><p className="mt-1 text-sm text-slate-500">{topic.paperCount} papers · {topic.trendScore}% growth</p></div>)}</div>
         </section>
       </div>
+      {!!recommendations.data?.length && (
+        <section>
+          <h2 className="mb-4 text-lg font-semibold text-navy">Recommended papers</h2>
+          <div className="grid gap-3">
+            {recommendations.data.map((item) => (
+              <Link key={item._id} to={`/papers/${item.paperId._id}`} className="rounded-lg border border-slate-200 bg-white p-4 transition hover:border-blue-200 hover:shadow-md">
+                <p className="font-semibold text-navy">{item.paperId.title}</p>
+                <p className="mt-1 text-sm text-slate-500">{item.paperId.journal} - {item.paperId.publicationYear || "n.d."} - score {item.score}</p>
+                <p className="mt-2 text-xs font-medium text-ocean">{item.reasons.join(" - ")}</p>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

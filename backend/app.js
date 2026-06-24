@@ -36,6 +36,7 @@ app.use("/api/keywords", require("./routes/keyword.routes"));
 app.use("/api/topics", require("./routes/topic.routes"));
 app.use("/api/bookmarks", require("./routes/bookmark.routes"));
 app.use("/api/notifications", require("./routes/notification.routes"));
+app.use("/api/recommendations", require("./routes/recommendation.routes"));
 app.use("/api/dashboard", require("./routes/dashboard.routes"));
 app.use("/api/admin", require("./routes/admin.routes"));
 

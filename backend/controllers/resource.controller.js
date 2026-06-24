@@ -8,8 +8,20 @@ const ResearchPaper = require("../models/ResearchPaper");
 const PublicationTrend = require("../models/PublicationTrend");
 const asyncHandler = require("../utils/asyncHandler");
 const { ok } = require("../utils/apiResponse");
+const { pagePayload, parsePagination } = require("../utils/pagination");
 
-exports.listJournals = asyncHandler(async (req, res) => ok(res, { items: await Journal.find().sort({ paperCount: -1 }) }));
+const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+exports.listJournals = asyncHandler(async (req, res) => {
+  const { page, limit, skip } = parsePagination(req.query, { limit: 12 });
+  const q = String(req.query.q || "").trim();
+  const filter = q ? { $or: [{ name: new RegExp(escapeRegExp(q), "i") }, { topics: new RegExp(escapeRegExp(q), "i") }] } : {};
+  const [items, total] = await Promise.all([
+    Journal.find(filter).sort({ paperCount: -1 }).skip(skip).limit(limit),
+    Journal.countDocuments(filter)
+  ]);
+  ok(res, pagePayload({ items, total, page, limit }));
+});
 exports.journalDetail = asyncHandler(async (req, res) => {
   const item = await Journal.findById(req.params.id);
   if (!item) throw createError(404, "Journal not found");
@@ -23,9 +35,15 @@ exports.journalTrends = asyncHandler(async (req, res) => {
 exports.journalPapers = asyncHandler(async (req, res) => {
   const journal = await Journal.findById(req.params.id);
   if (!journal) throw createError(404, "Journal not found");
-  const search = req.query.q ? { title: new RegExp(req.query.q, "i") } : {};
-  const items = await ResearchPaper.find({ journal: journal.name, sourceName: "semantic_scholar", ...search }).sort({ publicationYear: -1, createdAt: -1 });
-  ok(res, { journal, items });
+  const { page, limit, skip } = parsePagination(req.query, { limit: 10 });
+  const q = String(req.query.q || "").trim();
+  const search = q ? { $or: [{ title: new RegExp(escapeRegExp(q), "i") }, { keywords: new RegExp(escapeRegExp(q), "i") }, { topics: new RegExp(escapeRegExp(q), "i") }] } : {};
+  const filter = { journal: journal.name, ...search };
+  const [items, total] = await Promise.all([
+    ResearchPaper.find(filter).select("-apiRawData").sort({ publicationYear: -1, createdAt: -1 }).skip(skip).limit(limit),
+    ResearchPaper.countDocuments(filter)
+  ]);
+  ok(res, pagePayload({ items, total, page, limit, extra: { journal } }));
 });
 
 exports.listKeywords = asyncHandler(async (req, res) => ok(res, { items: await Keyword.find().sort({ name: 1 }) }));
@@ -44,28 +62,60 @@ exports.listTopics = asyncHandler(async (req, res) => ok(res, { items: await Res
 exports.popularTopics = asyncHandler(async (req, res) => ok(res, { items: await ResearchTopic.find().sort({ paperCount: -1 }).limit(20) }));
 exports.emergingTopics = asyncHandler(async (req, res) => ok(res, { items: await ResearchTopic.find().sort({ trendScore: -1 }).limit(20) }));
 
-exports.listBookmarks = asyncHandler(async (req, res) => ok(res, { items: await Bookmark.find({ userId: req.user._id }).populate("paperId").sort({ createdAt: -1 }) }));
+const cleanTags = (tags = []) => [...new Set(tags.map((tag) => String(tag || "").trim()).filter(Boolean))];
+const cleanCollection = (collection) => String(collection || "General").trim() || "General";
+const serializeBookmark = (bookmark) => {
+  const item = bookmark.toObject ? bookmark.toObject() : bookmark;
+  return { ...item, collection: item.collectionName || item.collection || "General" };
+};
+
+exports.listBookmarks = asyncHandler(async (req, res) => {
+  const { page, limit, skip } = parsePagination(req.query, { limit: 10 });
+  const selectedCollection = String(req.query.collection || "").trim();
+  const filter = { userId: req.user._id, ...(selectedCollection && selectedCollection !== "all" && { collectionName: selectedCollection }) };
+  const [items, total, allCollections] = await Promise.all([
+    Bookmark.find(filter).populate({ path: "paperId", select: "-apiRawData" }).sort({ collectionName: 1, createdAt: -1 }).skip(skip).limit(limit),
+    Bookmark.countDocuments(filter),
+    Bookmark.find({ userId: req.user._id }).select("collectionName")
+  ]);
+  const serialized = items.map(serializeBookmark);
+  const collections = [...new Set(allCollections.map((item) => item.collectionName || "General"))].sort((a, b) => a.localeCompare(b));
+  ok(res, pagePayload({ items: serialized, total, page, limit, extra: { collections } }));
+});
 exports.createBookmark = asyncHandler(async (req, res) => {
   const paper = await ResearchPaper.findById(req.body.paperId);
   if (!paper) throw createError(404, "Paper not found");
   const bookmark = await Bookmark.findOneAndUpdate(
     { userId: req.user._id, paperId: req.body.paperId },
-    { note: req.body.note, tags: req.body.tags || [] },
+    { collectionName: cleanCollection(req.body.collection), note: req.body.note, tags: cleanTags(req.body.tags) },
     { new: true, upsert: true, setDefaultsOnInsert: true }
-  ).populate("paperId");
-  ok(res, { bookmark }, "Bookmark saved", 201);
+  ).populate({ path: "paperId", select: "-apiRawData" });
+  ok(res, { bookmark: serializeBookmark(bookmark) }, "Bookmark saved", 201);
 });
 exports.updateBookmark = asyncHandler(async (req, res) => {
-  const bookmark = await Bookmark.findOneAndUpdate({ _id: req.params.id, userId: req.user._id }, req.body, { new: true }).populate("paperId");
+  const updates = {
+    ...(req.body.collection !== undefined && { collectionName: cleanCollection(req.body.collection) }),
+    ...(req.body.note !== undefined && { note: req.body.note }),
+    ...(req.body.tags !== undefined && { tags: cleanTags(req.body.tags) })
+  };
+  const bookmark = await Bookmark.findOneAndUpdate({ _id: req.params.id, userId: req.user._id }, updates, { new: true }).populate({ path: "paperId", select: "-apiRawData" });
   if (!bookmark) throw createError(404, "Bookmark not found");
-  ok(res, { bookmark }, "Bookmark updated");
+  ok(res, { bookmark: serializeBookmark(bookmark) }, "Bookmark updated");
 });
 exports.deleteBookmark = asyncHandler(async (req, res) => {
   await Bookmark.deleteOne({ _id: req.params.id, userId: req.user._id });
   ok(res, {}, "Bookmark removed");
 });
 
-exports.listNotifications = asyncHandler(async (req, res) => ok(res, { items: await Notification.find({ userId: req.user._id }).sort({ createdAt: -1 }) }));
+exports.listNotifications = asyncHandler(async (req, res) => {
+  const { page, limit, skip } = parsePagination(req.query, { limit: 10 });
+  const filter = { userId: req.user._id };
+  const [items, total] = await Promise.all([
+    Notification.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
+    Notification.countDocuments(filter)
+  ]);
+  ok(res, pagePayload({ items, total, page, limit }));
+});
 exports.readNotification = asyncHandler(async (req, res) => {
   const item = await Notification.findOneAndUpdate({ _id: req.params.id, userId: req.user._id }, { isRead: true }, { new: true });
   if (!item) throw createError(404, "Notification not found");

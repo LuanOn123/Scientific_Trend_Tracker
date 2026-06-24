@@ -57,6 +57,7 @@ export interface Journal {
 export interface Bookmark {
   _id: string;
   paperId: Paper;
+  collection: string;
   note?: string;
   tags: string[];
 }
@@ -71,6 +72,13 @@ export interface NotificationItem {
   createdAt: string;
 }
 
+export interface Recommendation {
+  _id: string;
+  paperId: Paper;
+  score: number;
+  reasons: string[];
+}
+
 export interface DashboardData {
   totals: { totalPapers: number; totalJournals: number; totalKeywords: number; totalTopics: number };
   papersByYear: { year: number; count: number }[];
@@ -83,4 +91,12 @@ export interface ApiResponse<T> {
   success: boolean;
   message: string;
   data: T;
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  limit: number;
+  pages: number;
 }
